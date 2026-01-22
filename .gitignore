@@ -50,6 +50,12 @@ Thumbs.db
 # Logs
 *.log
 
+# Large video files
+videos/
+*.mov
+*.mp4
+*.avi
+
 # Environment variables
 .env
 .env.local
