@@ -22,7 +22,7 @@ Interactive 3D visualization tool for word embeddings using TF-IDF, Word2Vec, an
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git https://github.com/yodawu28/word-vector-embedding-visualization
 cd word-vector-embedding
 
 # Create virtual environment with uv (recommended)
