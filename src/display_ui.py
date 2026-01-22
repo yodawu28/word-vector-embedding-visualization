@@ -87,6 +87,11 @@ def display():
 
     sentences = split_sentences(text)
     sent_tokens = [tokenize(s) for s in sentences if tokenize(s)]
+    
+    # Debug: show extracted text sample
+    with st.expander("🔍 Debug: Extracted text from document (first 500 chars)", expanded=False):
+        st.text(text[:500])
+        st.caption(f"Total text length: {len(text)} characters")
 
     # dynamic vocab limit (mainly for TF-IDF and for selecting top tokens in Word2Vec)
     all_tokens = [t for toks in sent_tokens for t in toks]
@@ -112,6 +117,20 @@ def display():
         st.write("**Top 30 tokens in document:**")
         st.write(", ".join([f"`{w}` ({c})" for w, c in top_30]))
         st.caption("If your input words don't appear here (or similar form), they won't be found in TF-IDF/Word2Vec")
+        
+        # Show if input words exist in vocabulary
+        st.write("\n**Checking your input words in document vocabulary:**")
+        for w in words:
+            toks = tokenize(w)
+            found_toks = [t for t in toks if t in token_counts]
+            if found_toks:
+                st.write(f"✅ `{w}` → tokens `{toks}` → FOUND in document: {', '.join([f'{t} ({token_counts[t]}x)' for t in found_toks])}")
+            else:
+                st.write(f"❌ `{w}` → tokens `{toks}` → NOT FOUND in document")
+                # Check for similar tokens (case-insensitive already handled)
+                similar = [tok for tok in token_counts.keys() if any(t in tok or tok in t for t in toks if len(t) > 2)][:3]
+                if similar:
+                    st.write(f"   💡 Similar tokens in doc: {', '.join([f'`{s}`' for s in similar])}")
 
     # explanation per mode
     if mode == "TF-IDF":
@@ -135,20 +154,91 @@ def display():
     # =============================
     with st.spinner("Building embeddings..."):
         if mode == "TF-IDF":
+            # Collect all input tokens that should be included
+            input_tokens = set()
+            for w in words:
+                input_tokens.update(tokenize(w))
+            
+            # Build TF-IDF, then ensure input tokens are added
             word_vecs = build_tfidf_vectors(sentences, max_vocab=max_vocab)
+            
+            # For missing input tokens, compute their TF-IDF manually
+            missing_tokens = input_tokens - set(word_vecs.keys())
+            if missing_tokens:
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                
+                # Create vectorizer with ALL vocabulary (input tokens + existing)
+                all_vocab = list(set(word_vecs.keys()) | input_tokens)
+                vectorizer = TfidfVectorizer(
+                    tokenizer=tokenize,
+                    preprocessor=lambda x: x,
+                    vocabulary=all_vocab,
+                    lowercase=True
+                )
+                X = vectorizer.fit_transform(sentences)
+                
+                # Add missing tokens to word_vecs
+                for token in missing_tokens:
+                    if token in vectorizer.vocabulary_:
+                        idx = vectorizer.vocabulary_[token]
+                        col = X.getcol(idx).toarray().ravel()
+                        word_vecs[token] = col.astype(np.float32)
+            
+            # Debug: show which input words are in TF-IDF vocabulary
+            with st.expander("🔍 Debug: TF-IDF vocabulary check", expanded=False):
+                st.write(f"**TF-IDF vocabulary size:** {len(word_vecs)} words")
+                st.write(f"**Max vocab setting:** {max_vocab}")
+                if missing_tokens:
+                    st.write(f"**Added {len(missing_tokens)} input words manually:** {', '.join(missing_tokens)}")
+                st.write("\n**Your input words in TF-IDF vocabulary:**")
+                for w in words:
+                    toks = tokenize(w)
+                    found_in_tfidf = [t for t in toks if t in word_vecs]
+                    if found_in_tfidf:
+                        st.write(f"✅ `{w}` → {found_in_tfidf} in TF-IDF vocab")
+                    else:
+                        st.write(f"❌ `{w}` → {toks} NOT in TF-IDF vocab (will get zero vector)")
 
         elif mode == "Word2Vec":
             w2v_all = build_word2vec_vectors(
                 sentences, vector_size=vector_size, window=window, epochs=epochs)
 
-            # keep top max_vocab by frequency for stability/speed
+            # Collect input tokens
+            input_tokens = set()
+            for w in words:
+                input_tokens.update(tokenize(w))
+
+            # Keep top max_vocab by frequency for stability/speed
             counts = {}
             for toks in sent_tokens:
                 for t in toks:
                     counts[t] = counts.get(t, 0) + 1
-            top_words = [w for w, _ in sorted(counts.items(), key=lambda x: x[1], reverse=True)[
-                :max_vocab] if w in w2v_all]
-            word_vecs = {w: w2v_all[w] for w in top_words}
+            
+            # Get top frequent words that exist in Word2Vec model
+            top_words = [w for w, _ in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:max_vocab] if w in w2v_all]
+            
+            # Ensure all input tokens are included (even if not in top max_vocab)
+            all_words = set(top_words)
+            for token in input_tokens:
+                if token in w2v_all:
+                    all_words.add(token)
+            
+            word_vecs = {w: w2v_all[w] for w in all_words}
+            
+            # Debug: show which input words are in Word2Vec vocabulary
+            missing_from_w2v = input_tokens - set(w2v_all.keys())
+            with st.expander("🔍 Debug: Word2Vec vocabulary check", expanded=False):
+                st.write(f"**Word2Vec vocabulary size:** {len(word_vecs)} words (includes {len(all_words - set(top_words))} input words)")
+                st.write(f"**Max vocab setting:** {max_vocab}")
+                st.write("\n**Your input words in Word2Vec vocabulary:**")
+                for w in words:
+                    toks = tokenize(w)
+                    found_in_w2v = [t for t in toks if t in word_vecs]
+                    if found_in_w2v:
+                        st.write(f"✅ `{w}` → {found_in_w2v} in Word2Vec vocab")
+                    else:
+                        missing = [t for t in toks if t not in w2v_all]
+                        st.write(f"❌ `{w}` → {toks} NOT in Word2Vec (tokens not in document: {missing})")
 
         else:  # Transformer
             # background: top tokens by frequency (optional)
@@ -197,6 +287,24 @@ def display():
 
     labels = [w for w, _ in resolved]
     focus_matrix = np.vstack([v for _, v in resolved]).astype(np.float32)
+    
+    # Check minimum requirements for visualization
+    if len(labels) < 2:
+        st.error("Need at least 2 words to visualize. Please add more words.")
+        st.stop()
+    
+    if len(labels) < 3:
+        st.warning("⚠️ You have only 2 words. For better 3D visualization, add at least 3 words. Proceeding with 2D projection...")
+    
+    # Check if we have enough non-zero vectors for PCA
+    non_zero_count = np.sum(np.linalg.norm(focus_matrix, axis=1) > 0)
+    if mode == "TF-IDF" and non_zero_count == 0:
+        st.error("All input words have zero vectors (not in TF-IDF vocabulary). Try increasing max_vocab or use different words.")
+        st.stop()
+    if non_zero_count < 2:
+        st.warning(f"Only {non_zero_count} non-zero vector(s). Need at least 2 for meaningful comparison. Add more words or try Transformer mode.")
+        if non_zero_count == 0:
+            st.stop()
 
     # cosine similarity (on original vectors)
     sim_df = cosine_similarity_matrix_allow_zeros(focus_matrix, labels)

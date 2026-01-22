@@ -16,7 +16,7 @@ Interactive 3D visualization tool for word embeddings using TF-IDF, Word2Vec, an
 
 ## 🎥 Demo
 
-![Demo](videos/video.gif)
+![Demo](videos/video_demo.gif)
 
 ## 🚀 Installation
 

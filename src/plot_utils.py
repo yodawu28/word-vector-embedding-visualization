@@ -19,10 +19,25 @@ def project_focus_to_3d(
     Key: fit PCA on FOCUS (default) to avoid "chụm".
     """
     rng = np.random.RandomState(42)
+    
+    # Determine actual number of components based on data shape
+    n_samples, n_features = focus_matrix.shape
+    n_components = min(3, n_samples, n_features)
 
     if pca_fit_mode == "Focus only" or (bg_matrix is None) or (not show_background):
-        pca = PCA(n_components=3, random_state=42).fit(focus_matrix)
-        focus_3d = pca.transform(focus_matrix)
+        if n_components < 3:
+            # Pad to 3D if we have fewer dimensions
+            pca = PCA(n_components=n_components, random_state=42).fit(focus_matrix)
+            focus_reduced = pca.transform(focus_matrix)
+            # Pad with zeros to make it 3D
+            if n_components < 3:
+                pad_width = ((0, 0), (0, 3 - n_components))
+                focus_3d = np.pad(focus_reduced, pad_width, mode='constant', constant_values=0)
+            else:
+                focus_3d = focus_reduced
+        else:
+            pca = PCA(n_components=3, random_state=42).fit(focus_matrix)
+            focus_3d = pca.transform(focus_matrix)
         bg_3d = None
         return focus_3d, bg_3d, None
 
@@ -31,14 +46,31 @@ def project_focus_to_3d(
     fit_n = min(bg_fit_sample, Nbg)
     fit_idx = rng.choice(Nbg, size=fit_n, replace=False)
     fit_matrix = np.vstack([focus_matrix, bg_matrix[fit_idx]]).astype(np.float32)
+    
+    # Determine components based on combined matrix
+    n_samples_combined, n_features_combined = fit_matrix.shape
+    n_components = min(3, n_samples_combined, n_features_combined)
 
-    pca = PCA(n_components=3, random_state=42).fit(fit_matrix)
-    focus_3d = pca.transform(focus_matrix)
+    pca = PCA(n_components=n_components, random_state=42).fit(fit_matrix)
+    focus_reduced = pca.transform(focus_matrix)
+    
+    # Pad to 3D if necessary
+    if n_components < 3:
+        pad_width = ((0, 0), (0, 3 - n_components))
+        focus_3d = np.pad(focus_reduced, pad_width, mode='constant', constant_values=0)
+    else:
+        focus_3d = focus_reduced
 
     # plot bg sample (not necessarily same as fit sample)
     plot_n = min(bg_plot_sample, Nbg)
     plot_idx = rng.choice(Nbg, size=plot_n, replace=False)
-    bg_3d = pca.transform(bg_matrix[plot_idx])
+    bg_reduced = pca.transform(bg_matrix[plot_idx])
+    
+    if n_components < 3:
+        bg_3d = np.pad(bg_reduced, pad_width, mode='constant', constant_values=0)
+    else:
+        bg_3d = bg_reduced
+        
     return focus_3d, bg_3d, plot_idx
 
 # =============================
